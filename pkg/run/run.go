@@ -2,26 +2,24 @@ package run
 
 import (
 	"flag"
-	"fmt"
 	"time"
 
 	"github.com/chelnak/ysmrr"
 	"github.com/mvazquezc/termin8/pkg/utils"
 	"github.com/mvazquezc/termin8/pkg/version"
-	"k8s.io/client-go/discovery"
 	"k8s.io/klog/v2"
 )
 
 // Can terminate specific objects in a given namespace
 // Must check that objects to be deleted have a terminationTimestamp
 
-func RunCommandRun(kubeconfigFile string, namespaces []string, skipAPIResources []string, dryRun bool) ([]utils.RunResult, error) {
+func RunCommandRun(kubeconfigFile string, namespaces []string, skipAPIResources []string, dryRun bool) (utils.RunResults, error) {
 	// Disable klog
 	klog.InitFlags(nil)
 	flag.Set("logtostderr", "false")
 	flag.Set("alsologtostderr", "false")
 	flag.Parse()
-	var runResults []utils.RunResult
+	var runResults utils.RunResults
 	var terminatedResources []string
 	terminatedResourcesCount := 0
 	sm := ysmrr.NewSpinnerManager()
@@ -36,17 +34,12 @@ func RunCommandRun(kubeconfigFile string, namespaces []string, skipAPIResources 
 		return runResults, err
 	}
 	for _, namespace := range namespaces {
-		stuckResources, err := utils.GetNamespacedStuckResources(namespace, skipAPIResources, clientSet, client, termin8Spinner)
+		stuckResources, nonAvailableApiServices, err := utils.GetNamespacedStuckResources(namespace, skipAPIResources, clientSet, client, termin8Spinner)
 		if err != nil {
 			termin8Spinner.UpdateMessagef("Couldn't get stuck resources in namespace %s", namespace)
 			termin8Spinner.Error()
 			sm.Stop()
-			if discovery.IsGroupDiscoveryFailedError(err) {
-				fmt.Printf("\tWARNING: There are some API Services in 'Not Available' state, so you need to clean them up before continue terminating the namespaces")
-				fmt.Printf("\n\tTo do that you just need to execute 'kubectl get apiservice | grep ServiceNotFound', then you can backthem up and delete them:\n")
-				fmt.Printf("\n\tkubectl get apiservice <API SERVICE> -o yaml > ./apiservice_<name>_bck.yaml")
-				fmt.Printf("\n\tkubectl delete apiservice <API SERVICE>\n\n")
-			}
+
 			return runResults, err
 		}
 
@@ -65,7 +58,7 @@ func RunCommandRun(kubeconfigFile string, namespaces []string, skipAPIResources 
 				}
 				terminatedResources = append(terminatedResources, resource.ResourceType+"/"+resource.ResourceName)
 			}
-			runResults = append(runResults, utils.RunResult{
+			runResults.Results = append(runResults.Results, utils.RunResult{
 				Namespace:           namespace,
 				TerminatedResources: terminatedResources,
 			})
@@ -75,6 +68,7 @@ func RunCommandRun(kubeconfigFile string, namespaces []string, skipAPIResources 
 		terminatedResourcesCount += len(stuckResources)
 		// Clean terminatedresources for each iteration
 		terminatedResources = nil
+		runResults.NonAvailableApiServices = nonAvailableApiServices
 	}
 	if !dryRun {
 		termin8Spinner.UpdateMessagef("%s completed. %d stuck resources terminated.", version.GetBinaryName(), terminatedResourcesCount)

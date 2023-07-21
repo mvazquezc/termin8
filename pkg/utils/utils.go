@@ -35,49 +35,32 @@ func Contains(s []string, e string, matchCase bool) bool {
 	}
 	return false
 }
-
-func DiscoverNotAvailableApiServices(clientSet *kubernetes.Clientset) ([]string, error) {
-	_, apiServices, err := clientSet.Discovery().ServerGroupsAndResources()
-	if err != nil {
-		if discovery.IsGroupDiscoveryFailedError(err) {
-			return nil, err
-		}
-
-		return nil, fmt.Errorf("Error listing API services: %v", err)
-	}
-
-	notAvailableServices := make([]string, 0)
-	for _, svc := range apiServices {
-		if len(svc.APIResources) == 0 {
-			notAvailableServices = append(notAvailableServices, svc.GroupVersion)
-		}
-	}
-
-	return notAvailableServices, nil
-}
-
-func GetNamespacedStuckResources(namespace string, skipAPIResources []string, clientSet *kubernetes.Clientset, client *dynamic.DynamicClient, spinner *ysmrr.Spinner) ([]StuckResource, error) {
+func GetNamespacedStuckResources(namespace string, skipAPIResources []string, clientSet *kubernetes.Clientset, client *dynamic.DynamicClient, spinner *ysmrr.Spinner) ([]StuckResource, []string, error) {
 	var stuckResources []StuckResource
+	var nonAvailableApiServices []string
 	currentProgress := 0
 	// If namespace doesn't exist we skip it
 	_, err := clientSet.CoreV1().Namespaces().Get(context.TODO(), namespace, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			return stuckResources, nil
+			return stuckResources, nonAvailableApiServices, nil
 		} else {
-			return stuckResources, err
+			return stuckResources, nonAvailableApiServices, err
 		}
 	}
 
 	apiResources, err := clientSet.Discovery().ServerPreferredNamespacedResources()
 	if err != nil {
-
-		_, err := DiscoverNotAvailableApiServices(clientSet)
-		if err != nil {
-			return nil, err
+		// We don't fail if some apiservice cannot be discovered, instead we append the error
+		// to a slice, and we will print a warning
+		if discovery.IsGroupDiscoveryFailedError(err) {
+			nonAvailableApiServices = append(nonAvailableApiServices, err.Error())
+			// Need to clean the err var otherwise it will be returned at the end of the function
+			err = nil
+		} else {
+			return stuckResources, nonAvailableApiServices, fmt.Errorf("Error discovering namespaced stuck resources: %w", err)
 		}
 
-		return stuckResources, fmt.Errorf("Error discovering namespaced stuck resources: %w", err)
 	}
 	for i, apiResourceList := range apiResources {
 		currentProgress = (i * 100) / len(apiResources)
@@ -107,13 +90,13 @@ func GetNamespacedStuckResources(namespace string, skipAPIResources []string, cl
 			if Contains(apiResource.Verbs, "list", true) && Contains(apiResource.Verbs, "get", true) && Contains(apiResource.Verbs, "delete", true) {
 				resourceList, err := client.Resource(gvr).Namespace(namespace).List(context.TODO(), metav1.ListOptions{})
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				for _, resource := range resourceList.Items {
 					// Get resource, check if it has a deletionTimestamp, if it has, check if it has finalizers, if it has add it to the stuckresource list
 					resourceData, err := client.Resource(gvr).Namespace(namespace).Get(context.TODO(), resource.GetName(), metav1.GetOptions{})
 					if err != nil {
-						return nil, err
+						return nil, nil, err
 					}
 					if resourceData.GetDeletionTimestamp() != nil && resourceData.GetFinalizers() != nil {
 						stuckResource := StuckResource{
@@ -129,8 +112,7 @@ func GetNamespacedStuckResources(namespace string, skipAPIResources []string, cl
 			}
 		}
 	}
-
-	return stuckResources, err
+	return stuckResources, nonAvailableApiServices, err
 }
 
 func RemoveFinalizer(sr StuckResource, client *dynamic.DynamicClient) error {

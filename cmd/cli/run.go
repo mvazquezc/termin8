@@ -33,16 +33,23 @@ func NewRunCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if len(runResults.NonAvailableApiServices) > 0 {
+				fmt.Println()
+				fmt.Println("WARNING: There are some API Services in 'Not Available' state, some objects may not be deleted. You may want to fix them and run this tool again.")
+				for _, nonAvailableApiService := range runResults.NonAvailableApiServices {
+					fmt.Printf("  - %s\n", nonAvailableApiService)
+				}
+			}
 			switch {
 			case extendedOutput == "yaml":
-				if len(runResults) > 0 {
+				if len(runResults.Results) > 0 {
 					fmt.Println()
-					utils.WriteYamlOutput(runResults)
+					utils.WriteYamlOutput(runResults.Results)
 				}
 			case extendedOutput == "json":
-				if len(runResults) > 0 {
+				if len(runResults.Results) > 0 {
 					fmt.Println()
-					utils.WriteJsonOutput(runResults)
+					utils.WriteJsonOutput(runResults.Results)
 				}
 			}
 			return err
