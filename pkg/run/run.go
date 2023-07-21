@@ -2,11 +2,14 @@ package run
 
 import (
 	"flag"
+	"fmt"
+	"time"
+
 	"github.com/chelnak/ysmrr"
 	"github.com/mvazquezc/termin8/pkg/utils"
 	"github.com/mvazquezc/termin8/pkg/version"
+	"k8s.io/client-go/discovery"
 	"k8s.io/klog/v2"
-	"time"
 )
 
 // Can terminate specific objects in a given namespace
@@ -38,6 +41,12 @@ func RunCommandRun(kubeconfigFile string, namespaces []string, skipAPIResources 
 			termin8Spinner.UpdateMessagef("Couldn't get stuck resources in namespace %s", namespace)
 			termin8Spinner.Error()
 			sm.Stop()
+			if discovery.IsGroupDiscoveryFailedError(err) {
+				fmt.Printf("\tWARNING: There are some API Services in 'Not Available' state, so you need to clean them up before continue terminating the namespaces")
+				fmt.Printf("\n\tTo do that you just need to execute 'kubectl get apiservice | grep ServiceNotFound', then you can backthem up and delete them:\n")
+				fmt.Printf("\n\tkubectl get apiservice <API SERVICE> -o yaml > ./apiservice_<name>_bck.yaml")
+				fmt.Printf("\n\tkubectl delete apiservice <API SERVICE>\n\n")
+			}
 			return runResults, err
 		}
 

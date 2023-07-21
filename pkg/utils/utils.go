@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
+
 	"github.com/chelnak/ysmrr"
 	"gopkg.in/yaml.v3"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -15,8 +18,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"os"
-	"strings"
 )
 
 func Contains(s []string, e string, matchCase bool) bool {
@@ -35,6 +36,26 @@ func Contains(s []string, e string, matchCase bool) bool {
 	return false
 }
 
+func DiscoverNotAvailableApiServices(clientSet *kubernetes.Clientset) ([]string, error) {
+	_, apiServices, err := clientSet.Discovery().ServerGroupsAndResources()
+	if err != nil {
+		if discovery.IsGroupDiscoveryFailedError(err) {
+			return nil, err
+		}
+
+		return nil, fmt.Errorf("Error listing API services: %v", err)
+	}
+
+	notAvailableServices := make([]string, 0)
+	for _, svc := range apiServices {
+		if len(svc.APIResources) == 0 {
+			notAvailableServices = append(notAvailableServices, svc.GroupVersion)
+		}
+	}
+
+	return notAvailableServices, nil
+}
+
 func GetNamespacedStuckResources(namespace string, skipAPIResources []string, clientSet *kubernetes.Clientset, client *dynamic.DynamicClient, spinner *ysmrr.Spinner) ([]StuckResource, error) {
 	var stuckResources []StuckResource
 	currentProgress := 0
@@ -46,11 +67,17 @@ func GetNamespacedStuckResources(namespace string, skipAPIResources []string, cl
 		} else {
 			return stuckResources, err
 		}
-
 	}
+
 	apiResources, err := clientSet.Discovery().ServerPreferredNamespacedResources()
 	if err != nil {
-		return stuckResources, err
+
+		_, err := DiscoverNotAvailableApiServices(clientSet)
+		if err != nil {
+			return nil, err
+		}
+
+		return stuckResources, fmt.Errorf("Error discovering namespaced stuck resources: %w", err)
 	}
 	for i, apiResourceList := range apiResources {
 		currentProgress = (i * 100) / len(apiResources)
