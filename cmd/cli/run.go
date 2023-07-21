@@ -3,10 +3,11 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"os"
+
 	"github.com/mvazquezc/termin8/pkg/run"
 	"github.com/mvazquezc/termin8/pkg/utils"
 	"github.com/spf13/cobra"
-	"os"
 )
 
 var (
