@@ -14,7 +14,7 @@ func main() {
 
 }
 
-// newRootCommand implements the root command of example-ci
+// newRootCommand implements the root command of terminate
 func newRootCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "termin8",
