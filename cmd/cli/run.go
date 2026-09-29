@@ -10,26 +10,26 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
+// runOptions holds the flag values for a single invocation of the run command.
+type runOptions struct {
 	kubeconfigFile   string
 	namespaces       []string
 	skipAPIResources []string
 	extendedOutput   string
 	dryRun           bool
-)
+}
 
 func NewRunCommand() *cobra.Command {
+	opts := &runOptions{}
 	cmd := &cobra.Command{
 		Use:          "run",
 		Short:        "Terminates stuck namespaced resources in the specified namespaces",
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Validate command Args
-			err := validateRunCommandArgs()
-			if err != nil {
+			if err := opts.validate(); err != nil {
 				return err
 			}
-			runResults, err := run.RunCommandRun(kubeconfigFile, namespaces, skipAPIResources, dryRun)
+			runResults, err := run.Execute(opts.kubeconfigFile, opts.namespaces, opts.skipAPIResources, opts.dryRun)
 			if err != nil {
 				return err
 			}
@@ -40,65 +40,66 @@ func NewRunCommand() *cobra.Command {
 					fmt.Printf("  - %s\n", nonAvailableApiService)
 				}
 			}
-			switch {
-			case extendedOutput == "yaml":
+			switch opts.extendedOutput {
+			case "yaml":
 				if len(runResults.Results) > 0 {
 					fmt.Println()
-					utils.WriteYamlOutput(runResults.Results)
+					if err := utils.WriteYamlOutput(runResults.Results); err != nil {
+						return err
+					}
 				}
-			case extendedOutput == "json":
+			case "json":
 				if len(runResults.Results) > 0 {
 					fmt.Println()
-					utils.WriteJsonOutput(runResults.Results)
+					if err := utils.WriteJsonOutput(runResults.Results); err != nil {
+						return err
+					}
 				}
 			}
-			return err
+			return nil
 		},
 	}
-	addRunCommandFlags(cmd)
+	opts.addFlags(cmd)
 	return cmd
 }
 
-func addRunCommandFlags(cmd *cobra.Command) {
-
+func (o *runOptions) addFlags(cmd *cobra.Command) {
 	flags := cmd.Flags()
-	flags.StringVarP(&kubeconfigFile, "kubeconfig", "k", "", "Path to the kubeconfig file to be used. If not set, will default to KUBECONFIG env var")
-	flags.StringSliceVarP(&namespaces, "namespaces", "n", []string{""}, "List of namespaces where stuck objects will be terminated (comma separated) e.g: ns1,ns2")
-	flags.StringSliceVarP(&skipAPIResources, "skip-api-resources", "s", nil, "List of namespaced api resources to skip (comma separated) e.g: myresource.group.example.com,myresource2.group2.example.com")
-	flags.StringVarP(&extendedOutput, "extended-output", "o", "", "Extended output in an specific format. Usage: '-o [  yaml | json ]'")
-	flags.BoolVarP(&dryRun, "dry-run", "d", false, "Will not terminate stuck resources, will output what would have been terminated")
+	flags.StringVarP(&o.kubeconfigFile, "kubeconfig", "k", "", "Path to the kubeconfig file to be used. If not set, will default to KUBECONFIG env var")
+	flags.StringSliceVarP(&o.namespaces, "namespaces", "n", nil, "List of namespaces where stuck objects will be terminated (comma separated) e.g: ns1,ns2")
+	flags.StringSliceVarP(&o.skipAPIResources, "skip-api-resources", "s", nil, "List of namespaced api resources to skip (comma separated) e.g: myresource.group.example.com,myresource2.group2.example.com")
+	flags.StringVarP(&o.extendedOutput, "extended-output", "o", "", "Extended output in an specific format. Usage: '-o [  yaml | json ]'")
+	flags.BoolVarP(&o.dryRun, "dry-run", "d", false, "Will not terminate stuck resources, will output what would have been terminated")
 	cmd.MarkFlagRequired("namespaces")
 }
 
-// validateCommandArgs validates that arguments passed by the user are valid
-func validateRunCommandArgs() error {
-
-	if kubeconfigFile != "" {
-		if _, err := os.Stat(kubeconfigFile); err != nil {
-			return errors.New("Kubeconfig file " + kubeconfigFile + " does not exist.")
+// validate checks that the flag values provided by the user are valid.
+func (o *runOptions) validate() error {
+	if o.kubeconfigFile != "" {
+		if _, err := os.Stat(o.kubeconfigFile); err != nil {
+			return fmt.Errorf("kubeconfig file %s does not exist", o.kubeconfigFile)
 		}
 	} else {
 		if _, err := os.Stat(os.Getenv("KUBECONFIG")); err != nil {
-			return errors.New("Kubeconfig file " + os.Getenv("KUBECONFIG") + " does not exist.")
+			return fmt.Errorf("kubeconfig file %s does not exist", os.Getenv("KUBECONFIG"))
 		}
 	}
-	for _, namespace := range namespaces {
+	for _, namespace := range o.namespaces {
 		if namespace == "" {
-			return errors.New("Namespaces list contains spaces")
+			return errors.New("namespaces list contains an empty namespace")
 		}
 	}
-	if len(skipAPIResources) > 0 {
-		for _, apiResource := range skipAPIResources {
-			if apiResource == "" {
-				return errors.New("skip-api-resources list contains spaces")
-			}
+	for _, apiResource := range o.skipAPIResources {
+		if apiResource == "" {
+			return errors.New("skip-api-resources list contains an empty entry")
 		}
 	}
-	if extendedOutput != "" && extendedOutput != "yaml" && extendedOutput != "json" {
-		return errors.New("Unsupported extended output format " + extendedOutput)
+	if o.extendedOutput != "" && o.extendedOutput != "yaml" && o.extendedOutput != "json" {
+		return fmt.Errorf("unsupported extended output format %s", o.extendedOutput)
 	}
-	if dryRun {
-		extendedOutput = "yaml"
+	// Default dry-run output to yaml, but don't override an explicit -o choice.
+	if o.dryRun && o.extendedOutput == "" {
+		o.extendedOutput = "yaml"
 	}
 
 	return nil

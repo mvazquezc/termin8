@@ -27,7 +27,7 @@ func Contains(s []string, e string, matchCase bool) bool {
 				return true
 			}
 		} else {
-			if strings.ToLower(a) == strings.ToLower(e) {
+			if strings.EqualFold(a, e) {
 				return true
 			}
 		}
@@ -58,7 +58,7 @@ func GetNamespacedStuckResources(namespace string, skipAPIResources []string, cl
 			// Need to clean the err var otherwise it will be returned at the end of the function
 			err = nil
 		} else {
-			return stuckResources, nonAvailableApiServices, fmt.Errorf("Error discovering namespaced stuck resources: %w", err)
+			return stuckResources, nonAvailableApiServices, fmt.Errorf("discovering namespaced stuck resources: %w", err)
 		}
 
 	}
@@ -93,12 +93,10 @@ func GetNamespacedStuckResources(namespace string, skipAPIResources []string, cl
 					return nil, nil, err
 				}
 				for _, resource := range resourceList.Items {
-					// Get resource, check if it has a deletionTimestamp, if it has, check if it has finalizers, if it has add it to the stuckresource list
-					resourceData, err := client.Resource(gvr).Namespace(namespace).Get(context.TODO(), resource.GetName(), metav1.GetOptions{})
-					if err != nil {
-						return nil, nil, err
-					}
-					if resourceData.GetDeletionTimestamp() != nil && resourceData.GetFinalizers() != nil {
+					// The listed object already contains the deletionTimestamp and
+					// finalizers, so there's no need to Get() it again. A resource is
+					// stuck when it has a deletionTimestamp and still has finalizers.
+					if resource.GetDeletionTimestamp() != nil && resource.GetFinalizers() != nil {
 						stuckResource := StuckResource{
 							ResourceName:      resource.GetName(),
 							ResourceType:      apiResource.Name,
@@ -131,7 +129,7 @@ func RemoveFinalizer(sr StuckResource, client *dynamic.DynamicClient) error {
 	if err != nil {
 		return err
 	}
-	return err
+	return nil
 }
 
 func NewKubeClients(kubeconfig string) (*dynamic.DynamicClient, *discovery.DiscoveryClient, *kubernetes.Clientset, error) {
@@ -145,7 +143,7 @@ func NewKubeClients(kubeconfig string) (*dynamic.DynamicClient, *discovery.Disco
 				return nil, nil, nil, err
 			}
 		} else {
-			return nil, nil, nil, errors.New("No kubeconfig file was provided and KUBECONFIG env var is unset")
+			return nil, nil, nil, errors.New("no kubeconfig file was provided and KUBECONFIG env var is unset")
 		}
 
 	} else {
@@ -166,15 +164,23 @@ func NewKubeClients(kubeconfig string) (*dynamic.DynamicClient, *discovery.Disco
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	return client, dClient, clientSet, err
+	return client, dClient, clientSet, nil
 }
 
-func WriteJsonOutput(rr []RunResult) {
-	o, _ := json.MarshalIndent(rr, "", "    ")
+func WriteJsonOutput(rr []RunResult) error {
+	o, err := json.MarshalIndent(rr, "", "    ")
+	if err != nil {
+		return fmt.Errorf("marshaling results to json: %w", err)
+	}
 	fmt.Println(string(o))
+	return nil
 }
 
-func WriteYamlOutput(rr []RunResult) {
-	o, _ := yaml.Marshal(rr)
+func WriteYamlOutput(rr []RunResult) error {
+	o, err := yaml.Marshal(rr)
+	if err != nil {
+		return fmt.Errorf("marshaling results to yaml: %w", err)
+	}
 	fmt.Println(string(o))
+	return nil
 }

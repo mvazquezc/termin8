@@ -2,24 +2,31 @@ package run
 
 import (
 	"flag"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"time"
 
 	"github.com/chelnak/ysmrr"
 	"github.com/mvazquezc/termin8/pkg/utils"
 	"github.com/mvazquezc/termin8/pkg/version"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/klog/v2"
 )
 
-// Can terminate specific objects in a given namespace
-// Must check that objects to be deleted have a terminationTimestamp
+// completedMessageDelay keeps the "terminated" spinner message on screen briefly
+// so it's readable before moving on to the next namespace.
+const completedMessageDelay = 2 * time.Second
 
-func RunCommandRun(kubeconfigFile string, namespaces []string, skipAPIResources []string, dryRun bool) (utils.RunResults, error) {
-	// Disable klog
+// init silences klog so its output doesn't interfere with the spinner UI. It runs
+// once at process start instead of on every Execute call.
+func init() {
 	klog.InitFlags(nil)
 	flag.Set("logtostderr", "false")
 	flag.Set("alsologtostderr", "false")
-	flag.Parse()
+}
+
+// Execute terminates stuck namespaced resources across the given namespaces.
+// A resource is considered stuck when it has a deletionTimestamp but still has
+// finalizers preventing its removal.
+func Execute(kubeconfigFile string, namespaces []string, skipAPIResources []string, dryRun bool) (utils.RunResults, error) {
 	var runResults utils.RunResults
 	var terminatedResources []string
 	terminatedResourcesCount := 0
@@ -69,7 +76,7 @@ func RunCommandRun(kubeconfigFile string, namespaces []string, skipAPIResources 
 				TerminatedResources: terminatedResources,
 			})
 			termin8Spinner.UpdateMessagef("%d stuck resources in namespace %s have been terminated", len(stuckResources), namespace)
-			time.Sleep(2 * time.Second)
+			time.Sleep(completedMessageDelay)
 		}
 		terminatedResourcesCount += len(stuckResources)
 		// Clean terminatedresources for each iteration

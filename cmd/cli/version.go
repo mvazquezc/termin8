@@ -6,16 +6,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
+type versionOptions struct {
 	short bool
-)
+}
 
 func NewVersionCommand() *cobra.Command {
+	opts := &versionOptions{}
 	cmd := &cobra.Command{
 		Use:   "version",
 		Short: "Display version information",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !short {
+			if !opts.short {
 				fmt.Printf("Cli version: %s\n", version.PrintVersion())
 				fmt.Printf("Build time: %s\n", version.GetBuildTime())
 				fmt.Printf("Git commit: %s\n", version.GetGitCommit())
@@ -28,11 +29,11 @@ func NewVersionCommand() *cobra.Command {
 			return nil
 		},
 	}
-	addVersionFlags(cmd)
+	opts.addFlags(cmd)
 	return cmd
 }
 
-func addVersionFlags(cmd *cobra.Command) {
+func (o *versionOptions) addFlags(cmd *cobra.Command) {
 	flags := cmd.Flags()
-	flags.BoolVar(&short, "short", false, "show only the version number")
+	flags.BoolVar(&o.short, "short", false, "show only the version number")
 }
